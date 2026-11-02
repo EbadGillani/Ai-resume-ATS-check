@@ -22,7 +22,9 @@ from pypdf import PdfReader
 # --------------------------------------------------------------------------- #
 # Configuration
 # --------------------------------------------------------------------------- #
-DEFAULT_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+# Gemini model names change often. If this one is unavailable for your key, the app
+# automatically falls back to the newest Flash model your key can use (see pick_fallback_model).
+DEFAULT_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
 MAX_FILE_MB = 5
 MAX_CHARS = 30_000          # resume text sent to the model (plenty for any resume)
 MAX_JD_CHARS = 10_000       # job description text sent to the model
@@ -259,6 +261,44 @@ def analyze_resume(
     raise ValueError(f"Could not read the AI response after 2 attempts: {last_error}")
 
 
+def is_model_not_found(exc: Exception) -> bool:
+    """True if a Gemini API error means the requested model does not exist / is not served."""
+    if getattr(exc, "code", None) == 404:
+        return True
+    msg = str(exc)
+    return "404" in msg or "NOT_FOUND" in msg or "not found" in msg.lower()
+
+
+def pick_fallback_model(client: Any, exclude: str | None = None) -> str | None:
+    """Ask the API which models this key can use and return the newest Flash text model.
+
+    Stable models (e.g. gemini-3.8-flash) always win over previews, even newer ones; a preview is
+    used only if no stable Flash model is available. Image, live, lite, TTS and other
+    specialised variants are ignored.
+    """
+    try:
+        models = list(client.models.list())
+    except Exception:
+        return None
+
+    best: tuple[tuple[int, int, int], str] | None = None
+    for m in models:
+        name = (getattr(m, "name", "") or "").removeprefix("models/")
+        if name == exclude:
+            continue
+        match = re.fullmatch(r"gemini-(\d+)(?:\.(\d+))?-flash(-preview[\w.-]*)?", name)
+        if not match:
+            continue
+        actions = getattr(m, "supported_actions", None)
+        if actions and "generateContent" not in actions:
+            continue
+        major, minor, preview = int(match.group(1)), int(match.group(2) or 0), match.group(3)
+        key = (0 if preview else 1, major, minor)  # stable (1) beats any preview (0), then newest version
+        if best is None or key > best[0]:
+            best = (key, name)
+    return best[1] if best else None
+
+
 # --------------------------------------------------------------------------- #
 # UI helpers
 # --------------------------------------------------------------------------- #
@@ -407,8 +447,20 @@ def main() -> None:
             from google.genai import types
 
             client = genai.Client(api_key=api_key)
+            chosen = model.strip() or DEFAULT_MODEL
             with st.spinner("Analyzing with Gemini..."):
-                result = analyze_resume(client, model.strip() or DEFAULT_MODEL, text, job_description, types)
+                try:
+                    result = analyze_resume(client, chosen, text, job_description, types)
+                except Exception as exc:
+                    if not is_model_not_found(exc):
+                        raise
+                    fallback = pick_fallback_model(client, exclude=chosen)
+                    if not fallback:
+                        raise
+                    result = analyze_resume(client, fallback, text, job_description, types)
+                    st.info(f"Model '{chosen}' is not available for your API key, so '{fallback}' was used instead.")
+                    chosen = fallback
+            st.session_state["model_used"] = chosen
         except ValueError as exc:
             st.error(str(exc))
             return
@@ -428,6 +480,8 @@ def main() -> None:
 
     if "result" in st.session_state:
         render_results(st.session_state["result"])
+        if st.session_state.get("model_used"):
+            st.caption(f"Analysis by {st.session_state['model_used']}")
 
 
 if __name__ == "__main__":

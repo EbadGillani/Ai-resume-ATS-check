@@ -60,7 +60,7 @@ README.md         # This file
    streamlit run app.py
    ```
 
-Optional: set `GEMINI_MODEL` (default `gemini-2.5-flash`) or change the model name in the sidebar.
+Optional: set `GEMINI_MODEL` (default `gemini-3.8-flash`) or change the model name in the sidebar. If the model you pick is not available for your API key, the app automatically falls back to the newest Flash model your key can use and tells you which one it used.
 
 ## Push to GitHub
 
@@ -106,6 +106,6 @@ If you would rather not spend your own quota on public visitors, leave the secre
 ## Troubleshooting
 
 - **"Not enough readable text"**: the PDF is probably a scanned image. Export a text-based PDF or use DOCX.
-- **Model not found (404)**: Gemini model names change. Update the name in the sidebar or via `GEMINI_MODEL`.
+- **Model not found (404)**: Gemini model names change and old ones are retired (for example, `gemini-2.0-flash` is shut down and `gemini-2.5-flash` is no longer served to new keys). The app retries automatically with the newest Flash model your key supports; you can also set the name yourself in the sidebar or via `GEMINI_MODEL`. Current model IDs are listed at https://ai.google.dev/gemini-api/docs/models.
 - **Rate limit (429)**: the free tier has per-minute and daily limits; wait and retry.
 - **Privacy**: resume text is sent to the Gemini API for analysis. Do not use real personal data you are not comfortable sharing, and review Google's API data terms.
